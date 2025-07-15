@@ -643,6 +643,46 @@ case 'todos': {
 
     break;
 }
+case 'update': {
+  if (numero !== '519999999999') { // ← coloca aquí tu número real como creador
+    await sock.sendMessage(from, {
+      text: '⚠️ Este comando solo puede usarlo el creador.',
+      quoted: msg
+    });
+    break;
+  }
+
+  const { execSync } = require('child_process');
+  const fs = require('fs');
+  const chalk = require('chalk');
+
+  try {
+    const pull = execSync('git pull');
+    await sock.sendMessage(from, {
+      text: `✅ UPDATE DEL SISTEMA:\n\`\`\`\n${pull.toString().trim()}\n\`\`\``,
+      quoted: msg
+    });
+
+    // Activar auto-recarga del archivo
+    const file = require.resolve(__filename);
+    fs.watchFile(file, () => {
+      fs.unwatchFile(file);
+      console.log(chalk.redBright(`🌀 Actualización detectada en ${file}`));
+      delete require.cache[file];
+      require(file);
+    });
+
+  } catch (err) {
+    await sock.sendMessage(from, {
+      text: `❌ Error al actualizar:\n${err.message}`,
+      quoted: msg
+    });
+  }
+
+  break;
+}
+
+
 case 'setsubasta': {
     const mencionados = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
 
@@ -665,4 +705,269 @@ case 'setsubasta': {
         break;
     }
 
-    const [_, cantidad, nombreMoneda
+    const [_, cantidad, nombreMoneda, descripcion] = match;
+    const monedaSimbolo = getCurrencySymbol(nombreMoneda);
+    const numeroFormateado = vendedorJid.split('@')[0];
+    const timestamp = Date.now();
+    const filename = `${timestamp}.json`;
+    const filePath = path.join(AUCTION_FOLDER, filename);
+
+    const subasta = {
+        vendedor: vendedorJid,
+        cantidad,
+        moneda: monedaSimbolo,
+        descripcion,
+        tiempo: timestamp + (5 * 60 * 60 * 1000),
+        compradores: [],
+        registrados: []
+    };
+
+    fs.writeJsonSync(filePath, subasta);
+    const groupMetadata = isGroup ? await sock.groupMetadata(from) : {};
+
+    await sock.sendMessage(from, {
+        text:
+`📣 *SUBASTA INICIADA* 📣
+Subasta en: *${groupMetadata.subject.toUpperCase()}*
+Vendedor: @${numeroFormateado}
+Precio inicial: ${monedaSimbolo}${cantidad}
+Descripción: ${descripcion}
+Tiempo restante: 5 horas
+
+• Para participar debes registrarte:
+*${prefix}sureg nombre*
+*${prefix}sureg *
+
+_©️ By Arcanoloch-Group_`,
+        mentions: [vendedorJid]
+    });
+
+    break;
+}
+case 'sureg': {
+    const nombre = args.join(' ');
+    if (!nombre) return sock.sendMessage(from, { text: '❌ Debes ingresar tu nombre.\nEj: .sureg Pedro' });
+
+    const archivos = fs.readdirSync(AUCTION_FOLDER);
+    const activa = archivos.find(f => {
+        const s = fs.readJsonSync(path.join(AUCTION_FOLDER, f));
+        return s && s.tiempo > Date.now();
+    });
+
+    if (!activa) return sock.sendMessage(from, { text: '📪 No hay subastas activas.' });
+
+    const ruta = path.join(AUCTION_FOLDER, activa);
+    const subasta = fs.readJsonSync(ruta);
+
+    const yaRegistrado = subasta.registrados.find(r => r.id === senderJid);
+    if (yaRegistrado) return sock.sendMessage(from, { text: '✅ Ya estás registrado.' });
+
+    subasta.registrados.push({ id: senderJid, nombre });
+    fs.writeJsonSync(ruta, subasta);
+
+    await sock.sendMessage(from, { text: `✅ Te registraste como *${nombre}*. Ya puedes ofertar con *.doy cantidad moneda*.` });
+    break;
+}
+case 'doy': {
+    const regex = /(\d+)\s+(\w+)/i;
+    const match = body.match(regex);
+    if (!match) return sock.sendMessage(from, { text: '❌ Formato inválido.\nEj: .doy 5000 soles' });
+
+    const [_, oferta, nombreMoneda] = match;
+    const monedaSimbolo = getCurrencySymbol(nombreMoneda);
+
+    const archivos = fs.readdirSync(AUCTION_FOLDER);
+    const activa = archivos.find(f => {
+        const s = fs.readJsonSync(path.join(AUCTION_FOLDER, f));
+        return s && s.tiempo > Date.now();
+    });
+
+    if (!activa) return sock.sendMessage(from, { text: '📪 No hay subastas activas.' });
+
+    const ruta = path.join(AUCTION_FOLDER, activa);
+    const subasta = fs.readJsonSync(ruta);
+
+    const registrado = subasta.registrados.find(r => r.id === senderJid);
+    if (!registrado) return sock.sendMessage(from, { text: '❌ No estás registrado.\nUsa *.sureg tuNombre* antes de ofertar.' });
+
+    subasta.compradores.push({
+        id: senderJid,
+        oferta,
+        moneda: monedaSimbolo,
+        nombre: registrado.nombre
+    });
+
+    fs.writeJsonSync(ruta, subasta);
+
+    await sock.sendMessage(from, { text: `📝 Oferta aceptada: *${registrado.nombre}* ofrece *${monedaSimbolo}${oferta}*` });
+    break;
+}
+case 'vendido': {
+    const nombreComprador = args.join(' ');
+    if (!nombreComprador) return sock.sendMessage(from, { text: '❌ Escribe el nombre del comprador.\nEj: .vendido Pedro' });
+
+    const archivos = fs.readdirSync(AUCTION_FOLDER);
+    const activa = archivos.find(f => {
+        const s = fs.readJsonSync(path.join(AUCTION_FOLDER, f));
+        return s && s.tiempo > Date.now();
+    });
+
+    if (!activa) return sock.sendMessage(from, { text: '📪 No hay subastas activas.' });
+
+    const ruta = path.join(AUCTION_FOLDER, activa);
+    const subasta = fs.readJsonSync(ruta);
+
+    const comprador = subasta.compradores.find(c => c.nombre.toLowerCase() === nombreComprador.toLowerCase());
+    if (!comprador) return sock.sendMessage(from, { text: '❌ Comprador no encontrado entre las ofertas.' });
+
+    await sock.sendMessage(from, {
+        text:
+`✅ *VENTA CONFIRMADA* ✅
+Comprador: ${comprador.nombre}
+Precio: ${comprador.moneda}${comprador.oferta}
+Descripción: ${subasta.descripcion}
+
+Gracias por participar en esta subasta.
+Esta subasta ha sido cerrada.
+
+_©️ By Arcanoloch-Group_`
+    });
+
+    fs.removeSync(ruta);
+    break;
+}
+case 'cerrarsubasta': {
+    const archivos = fs.readdirSync(AUCTION_FOLDER);
+    const activa = archivos.find(f => {
+        const s = fs.readJsonSync(path.join(AUCTION_FOLDER, f));
+        return s && s.tiempo > Date.now();
+    });
+
+    if (!activa) return sock.sendMessage(from, { text: '📪 No hay subasta activa que cerrar.' });
+
+    const ruta = path.join(AUCTION_FOLDER, activa);
+    fs.removeSync(ruta);
+
+    await sock.sendMessage(from, {
+        text:
+`🛑 *SUBASTA CANCELADA* 🛑
+Se cerró la subasta manualmente sin comprador.
+
+_©️ By Arcanoloch-Group_`
+    });
+
+    break;
+}
+
+
+case 'bcgc':
+case 'comunicado': {
+  const numeroPropietario = '51994729892';
+  const isCreator = numero === numeroPropietario;
+
+  const text = args.join(' ');
+  if (!isCreator) {
+    await sock.sendMessage(from, {
+      text: `⚠️ Este comando solo puede usarlo el propietario del bot.`,
+      quoted: msg
+    });
+    break;
+  }
+
+  if (!text) {
+    await sock.sendMessage(from, {
+      text: `✏️ Ingresa el mensaje a difundir.\nEjemplo:\n.bcgc El sistema se actualizará hoy.`,
+      quoted: msg
+    });
+    break;
+  }
+
+  const getGroups = await sock.groupFetchAllParticipating();
+  const groups = Object.entries(getGroups).map(([_, data]) => data);
+  const listaIDs = groups.map(g => g.id);
+
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  let enviados = 0;
+
+  await sock.sendMessage(from, { text: `📣 Difundiendo a ${listaIDs.length} grupo(s)...` });
+
+  for (const chatId of listaIDs) {
+    try {
+      await sleep(1500); // Espera para evitar spam
+      const mensaje = `📢 *COMUNICADO OFICIAL*\n\n${text}\n\n🤖 Bot: Arcanoloch-Group`;
+      await sock.sendMessage(chatId, { text: mensaje }, { quoted: msg });
+      enviados++;
+    } catch (err) {
+      console.error(chalk.red(`❌ Error al enviar a ${chatId}:`), err.message);
+    }
+  }
+
+  await sock.sendMessage(from, {
+    text: `✅ Mensaje enviado a ${enviados} grupo(s).\n⏱️ Tiempo estimado: ${enviados * 1.5} segundos.`
+  });
+
+  break;
+}
+case 'rgmail': {
+  const raw = args.join(' ');
+  const match = raw.match(/\(([^)]+)\)\s+(\S+@\S+)/);
+
+  if (!match) {
+    await sock.sendMessage(from, {
+      text: `❌ Formato incorrecto.\nUsa:\n.rgmail (mensaje) destino@gmail.com`
+    }, { quoted: msg });
+    break;
+  }
+
+  const mensaje = match[1];
+  const destino = match[2];
+  const remitente = 'Arcanolochgroup@gmail.com';
+  const claveApp = 'zhmajmejpbamlvvc';
+
+  const nodemailer = require('nodemailer');
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: remitente,
+      pass: claveApp
+    }
+  });
+
+  const mailOptions = {
+    from: remitente,
+    to: destino,
+    subject: `📢 Mensaje desde Arcanoloch Bot`,
+    text: mensaje
+  };
+
+  await sock.sendMessage(from, { text: `📨 Enviando correo a ${destino}...` }, { quoted: msg });
+
+  transporter.sendMail(mailOptions, async (error, info) => {
+    if (error) {
+      console.error('❌ Error al enviar:', error);
+      await sock.sendMessage(from, {
+        text: `❌ No se pudo enviar el correo.\nMotivo: ${error.message}`
+      }, { quoted: msg });
+    } else {
+      await sock.sendMessage(from, {
+        text: `✅ El correo fue enviado correctamente a ${destino}. 📬`
+      }, { quoted: msg });
+    }
+  });
+
+  break;
+}
+
+                default:
+                    await sock.sendMessage(from, {
+                        text: '❌ Comando no reconocido. Usa `.menu` para ver opciones.'
+                    });
+                    break;
+            }
+
+        } catch (err) {
+            console.error(chalk.red('\n❌ Error al procesar mensaje:'), err);
+        }
+    });
+};
+
