@@ -24,7 +24,6 @@
     "path": "^0.12.7",
     "moment-timezone": "^0.5.40",
     "@vitalets/google-translate-api": "^8.0.0",
-    "fs-extra": "^11.1.1",
-    "canvas": "^2.11.2"
+    "fs-extra": "^11.1.1"
   }
 }
