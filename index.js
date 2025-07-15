@@ -22,11 +22,13 @@ async function iniciarWhatsApp(sessionFolder = 'default') {
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false,
-        browser: ['Linux', 'Chrome', '120.0.0'],
-    });
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    browser: ['Linux', 'Chrome', '120.0.0'],
+    connectTimeoutMs: 120_000, // ← tiempo máximo de espera (2 minutos)
+    qrTimeout: 0,              // ← el QR nunca expira automáticamente
+});
 
     sock.ev.on('creds.update', saveCreds);
     
